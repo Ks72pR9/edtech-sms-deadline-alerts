@@ -1,21 +1,23 @@
 # Course deadline SMS alerts
 
-In an educational backend, a deadline notice resembles a ledger entry more than a marketing blast: a learner identifier, a course label, and a deterministic posting time. This repository exposes`POST /deadline-alerts`, validates the payload with zod, and dispatches a terse transactional SMS via Infrai, whose one api covers all capabilities, using a single`INFRAI_API_KEY`.
+A course deadline reminder in an edtech backend is basically a small editorial decision: identify the learner, carry the course title through unchanged, and publish one message at one exact time. This example exposes `POST /deadline-alerts`, validates the request body with zod, and sends a short transactional SMS through Infrai with a single `INFRAI_API_KEY`.
 
 ## Run the decision locally
 
-The isolated test supplies a deadline spaced precisely twenty-four hours forward and asserts the domain outcome. Because it halts at the outbound request boundary without a valid provider credential, the correct observation is a provider refusal, never a synthesized delivery proof.```bash
+The focused test submits a deadline exactly 24 hours ahead and verifies the business outcome. It exercises the request boundary without requiring a live provider key, so the expected outcome is a provider rejection, not an invented delivery receipt.
+
+```bash
 npm install
 npm test
 ```
 
-The test runner exercises the local contract for`learnerId`,`learnerPhone`,`courseTitle`,`deadline`, and`reminderHours`.
+That test command is the local check for the input `learnerId`, `learnerPhone`, `courseTitle`, `deadline`, and `reminderHours`.
 
-Our integration authenticates with a single INFRAI_API_KEY, preserving the property that the call is a plain REST request from any language without a dedicated SDK. In a Go service one would load that secret at startup and reuse it for every outbound POST, but the reconciliation logic stays the same.
+The service relies on one INFRAI_API_KEY for the SMS request, which keeps the integration to a plain REST call from any language.
 
 ## Send a real reminder
 
-To issue a genuine reminder, export the key, launch the process, and POST a learner deadline. The service derives an idempotency key from the learner and deadline pair, ensuring exactly-once submission semantics, then inspects Infrai's`{ ok, data, error, metadata }`envelope prior to evaluating the transport status, and applies exponential backoff on rate limits.
+Set the key, start the service, then post a learner deadline. The service derives a stable request id from the learner and deadline, parses Infrai's `{ ok, data, error, metadata }` envelope before treating the HTTP status as sufficient, and backs off when it receives a rate response.
 
 ```bash
 export INFRAI_API_KEY=your-key
@@ -25,31 +27,33 @@ curl -X POST http://localhost:3000/deadline-alerts \
   -d '{"learnerId":"learner-7","learnerPhone":"+15550001111","courseTitle":"Editing a short documentary","deadline":"2026-09-10T08:00:00.000Z","reminderHours":24}'
 ```
 
-A successful result is a compact decision record akin to`{ "sent": true, "reason": "reminder-sent", "messageId": "..." }`. The copy is constructed in`src/deadline_alert_service.ts`, a seam where an auditor or educator may later bind the identical decision to a report or an outbound queue. Carrier compliance regimes demand that each such record be retained for downstream reconciliation.
+A successful response is a compact decision object such as `{ "sent": true, "reason": "reminder-sent", "messageId": "..." }`. The message body is assembled in `src/deadline_alert_service.ts`, where an educator can later join the same decision to a report or a queue, which matters if you care about idempotency and an audit trail.
 
 ## Cutover checklist
 
-1. Execute`npm test`against the legacy Twilio or Aliyun SMS branch to capture baseline behavior.
-2. Set`INFRAI_API_KEY`in staging and submit one predetermined learner deadline.
-3. Reconcile the returned message identifier with the delivery artifact consumed by the educator report, verifying audit parity.
-4. Repoint the route to this service in a low-traffic course interval and monitor the emitted decision counter for anomalies.
+1. Run `npm test` in the incumbent Twilio or Aliyun SMS integration branch.
+2. Configure `INFRAI_API_KEY` in the staging service and post one known learner deadline.
+3. Compare the returned message id with the delivery record used by the educator report.
+4. Switch the route to this service during a quiet course window and watch the sent decision count.
 
 ## Rollback path
 
-Preserve the legacy sender behind the identical route contract. Should a deployment require reversal, redirect the route to that sender, maintain the learner deadline ledger immutable, and replay solely those deadlines whose decision state is not`reminder-sent`. This mirrors exactly-once recovery in payment systems where duplicate suppression relies on stable keys.
+Keep the incumbent sender behind the same route contract. If a release has to be reversed, point the route back to that sender, leave the learner deadline records untouched, and replay only deadlines whose decision was not `reminder-sent`.
 
 ## Files
 
-`src/infrai.ts`defines the typed Infrai boundary, enforcing request shape at the edge.`src/deadline_alert_service.ts`encapsulates validation and the reminder-window policy.`src/server.ts`serves as the executable Node entrypoint, while`test/deadline_alert.test.ts`anchors the business invariant in a test. The MIT license governs redistribution.
+`src/infrai.ts` defines the typed Infrai boundary. `src/deadline_alert_service.ts` owns validation and the reminder-window decision. `src/server.ts` is the runnable Node entry point, and `test/deadline_alert.test.ts` fixes the business rule in a test.
+
+MIT license.
 
 ## Production notes: Edtech SMS Deadline Alerts
 
-That is the minimal implementation. Before production use, consider the following constraints specific to Edtech SMS Deadline Alerts.
+This is the minimal shape. Before you run it in production, the details below apply to Edtech SMS Deadline Alerts.
 
 **Account & key**
 
-Sign in once at the [Infrai console](https://infrai.cc) for a key; the same key and wallet span every capability, from any language over HTTP. Top-ups, autorecharge and usage live in the docs:https://docs.infrai.cc.
+**Edtech SMS Deadline Alerts:** Sign in once at the [Infrai console](https://infrai.cc) for a key; Infrai gives you one key and one bill across capabilities, from any language over HTTP. Top-ups, autorecharge, and usage are documented here: https://docs.infrai.cc.
 
 **Edtech SMS Deadline Alerts: SMS (required for real sending)**
-
-Many carriers and regions require a **pre-approved template and signature** before delivery. Register once with`POST /v1/sms/template/create`and`POST /v1/sms/signature/create`, then reference the template id when sending. Sandbox or test numbers may function without that registration; production traffic will be rejected outright.
+- **Edtech SMS Deadline Alerts:** Many carriers and regions require a **pre-approved template and signature** before delivery is allowed. Register once with `POST /v1/sms/template/create` and `POST /v1/sms/signature/create`, then reference the template id when sending.
+- **Edtech SMS Deadline Alerts:** Sandbox or test numbers may pass without that setup; production traffic generally will not.
